@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grok Iframe Manager</title>
+    <script src="https://tailwindcss.com"></script>
+    <style>
+        .iframe-container iframe { width: 100%; height: 100%; border: none; border-radius: 8px; }
+        .iframe-wrapper { position: relative; background: #1a1a1a; border: 1px solid #333; height: 400px; }
+    </style>
+</head>
+<body class="bg-black text-white flex h-screen overflow-hidden">
+
+    <!-- Sidebar: Chat Interface -->
+    <aside class="w-1/3 border-r border-gray-800 flex flex-col p-4">
+        <h1 class="text-xl font-bold mb-4">Grok Controller</h1>
+        <div id="chat-box" class="flex-grow overflow-y-auto mb-4 space-y-3 p-2 bg-gray-900 rounded"></div>
+        <div class="flex gap-2">
+            <input id="user-input" type="text" placeholder="Tell Grok to open a site..." class="flex-grow bg-gray-800 p-2 rounded outline-none border border-transparent focus:border-blue-500">
+            <button onclick="sendToGrok()" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Send</button>
+        </div>
+    </aside>
+
+    <!-- Main: Iframe Grid -->
+    <main id="iframe-grid" class="w-2/3 p-4 grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto">
+        <!-- Iframes will appear here -->
+    </main>
+
+    <script>
+        const API_KEY = "YOUR_XAI_API_KEY"; // Replace with your key from console.x.ai
+
+        async function sendToGrok() {
+            const input = document.getElementById('user-input');
+            const chatBox = document.getElementById('chat-box');
+            const message = input.value;
+            if (!message) return;
+
+            // Update UI
+            chatBox.innerHTML += `<div class="text-blue-400"><b>You:</b> ${message}</div>`;
+            input.value = "";
+
+            // Call Grok with Function Calling
+            const response = await fetch("https://x.ai", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${API_KEY}` },
+                body: JSON.stringify({
+                    model: "grok-beta", // Or your preferred model
+                    messages: [{ role: "user", content: message }],
+                    tools: [{
+                        type: "function",
+                        function: {
+                            name: "manage_iframe",
+                            description: "Opens or closes a website iframe",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    action: { type: "string", enum: ["open", "close"] },
+                                    url: { type: "string" },
+                                    id: { type: "string", description: "Unique name for the frame" }
+                                },
+                                required: ["action", "id"]
+                            }
+                        }
+                    }]
+                })
+            });
+
+            const data = await response.json();
+            const toolCall = data.choices[0].message.tool_calls?.[0];
+
+            if (toolCall) {
+                const { action, url, id } = JSON.parse(toolCall.function.arguments);
+                handleIframe(action, url, id);
+                chatBox.innerHTML += `<div class="text-green-400 italic">Grok: ${action}ing ${id}...</div>`;
+            } else {
+                chatBox.innerHTML += `<div class="text-gray-300">Grok: ${data.choices[0].message.content}</div>`;
+            }
+        }
+
+        function handleIframe(action, url, id) {
+            const grid = document.getElementById('iframe-grid');
+            if (action === "open") {
+                const wrapper = document.createElement('div');
+                wrapper.id = `frame-${id}`;
+                wrapper.className = "iframe-wrapper rounded-lg overflow-hidden";
+                wrapper.innerHTML = `
+                    <div class="bg-gray-800 p-2 text-xs flex justify-between">
+                        <span>${url}</span>
+                        <button onclick="handleIframe('close', '', '${id}')" class="text-red-500">X</button>
+                    </div>
+                    <iframe src="${url}"></iframe>`;
+                grid.appendChild(wrapper);
+            } else {
+                document.getElementById(`frame-${id}`)?.remove();
+            }
+        }
+    </script>
+</body>
+</html>
