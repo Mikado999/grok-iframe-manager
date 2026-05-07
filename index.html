@@ -1,71 +1,111 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"><title>Grok Iframe Hub</title>
+    <meta charset="UTF-8">
+    <title>Grok Iframe Hub v2</title>
     <script src="https://tailwindcss.com"></script>
-    <style>.iframe-wrapper { height: 450px; background: #111; border: 1px solid #333; }</style>
+    <style>
+        .iframe-wrapper { height: 450px; background: #111; border: 1px solid #333; }
+        #chat-box::-webkit-scrollbar { width: 4px; }
+        #chat-box::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+    </style>
 </head>
-<body class="bg-black text-white flex h-screen">
+<body class="bg-black text-white flex h-screen font-sans">
+    
+    <!-- Sidebar -->
+    <aside class="w-80 border-r border-gray-800 flex flex-col p-4 bg-black">
+        <h1 class="text-xl font-bold mb-4 text-blue-500">Grok Iframe Hub</h1>
+        
+        <!-- Chat History Area -->
+        <div id="chat-box" class="flex-grow overflow-y-auto space-y-3 text-sm pr-2">
+            <div class="text-gray-500 italic">Ask Grok to "Open Wikipedia" or "Close site X"...</div>
+        </div>
 
-    <aside class="w-80 border-r border-gray-800 flex flex-col p-4">
-        <div id="chat-box" class="flex-grow overflow-y-auto space-y-2 text-sm"></div>
-        <input id="user-input" class="w-full bg-gray-900 p-2 mt-2 rounded border border-gray-700" placeholder="Ask Grok to open a site...">
+        <!-- Input Area -->
+        <div class="mt-4">
+            <input id="user-input" 
+                   class="w-full bg-gray-900 p-3 rounded-lg border border-gray-700 focus:border-blue-500 focus:outline-none transition-all" 
+                   placeholder="Type a command...">
+            <p class="text-[10px] text-gray-500 mt-2 text-center">Powered by Grok-Beta & Cloudflare</p>
+        </div>
     </aside>
 
-    <main id="iframe-grid" class="flex-grow p-4 grid grid-cols-2 gap-4 overflow-y-auto"></main>
+    <!-- Iframe Grid -->
+    <main id="iframe-grid" class="flex-grow p-6 grid grid-cols-2 gap-6 overflow-y-auto bg-[#050505]"></main>
 
     <script>
-        const WORKER_URL = "https://workers.dev"; // YOUR DEPLOYED WORKER URL
+        const WORKER_URL = "https://workers.dev";
 
         async function sendToGrok() {
             const input = document.getElementById('user-input');
-            const message = input.value;
+            const chatBox = document.getElementById('chat-box');
+            const message = input.value.trim();
             if(!message) return;
+
+            // 1. Add user message to UI
+            chatBox.innerHTML += `<div class="bg-gray-800 p-2 rounded text-blue-300 ml-4"><strong>You:</strong> ${message}</div>`;
             input.value = "";
+            chatBox.scrollTop = chatBox.scrollHeight;
 
-            const response = await fetch(`${WORKER_URL}/grok`, {
-                method: "POST",
-                body: JSON.stringify({
-                    model: "grok-beta",
-                    messages: [{ role: "user", content: message }],
-                    tools: [{
-                        type: "function",
-                        function: {
-                            name: "manage_iframe",
-                            description: "Open/close site iframes",
-                            parameters: {
-                                type: "object",
-                                properties: {
-                                    action: { type: "string", enum: ["open", "close"] },
-                                    url: { type: "string" },
-                                    id: { type: "string" }
-                                },
-                                required: ["action", "id"]
+            try {
+                const response = await fetch(`${WORKER_URL}/grok`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        model: "grok-beta",
+                        messages: [{ role: "user", content: message }],
+                        tools: [{
+                            type: "function",
+                            function: {
+                                name: "manage_iframe",
+                                description: "Open/close site iframes",
+                                parameters: {
+                                    type: "object",
+                                    properties: {
+                                        action: { type: "string", enum: ["open", "close"] },
+                                        url: { type: "string" },
+                                        id: { type: "string" }
+                                    },
+                                    required: ["action", "id"]
+                                }
                             }
-                        }
-                    }]
-                })
-            });
+                        }]
+                    })
+                });
 
-            const data = await response.json();
-            const tool = data.choices[0].message.tool_calls?.[0];
-            if (tool) {
-                const { action, url, id } = JSON.parse(tool.function.arguments);
-                handleIframe(action, url, id);
+                const data = await response.json();
+                const tool = data.choices[0].message.tool_calls?.[0];
+
+                if (tool) {
+                    const { action, url, id } = JSON.parse(tool.function.arguments);
+                    handleIframe(action, url, id);
+                    chatBox.innerHTML += `<div class="text-green-500 text-xs">✔ Action: ${action} ${id}</div>`;
+                } else {
+                    chatBox.innerHTML += `<div class="text-gray-400 text-xs">Grok: ${data.choices[0].message.content || 'Done!'}</div>`;
+                }
+            } catch (err) {
+                chatBox.innerHTML += `<div class="text-red-500 text-xs italic">Error: ${err.message}</div>`;
             }
+            chatBox.scrollTop = chatBox.scrollHeight;
         }
 
         function handleIframe(action, url, id) {
             const grid = document.getElementById('iframe-grid');
             if (action === "open") {
+                if (document.getElementById(`frame-${id}`)) return; // Avoid duplicates
+
                 const div = document.createElement('div');
                 div.id = `frame-${id}`;
-                div.className = "iframe-wrapper rounded flex flex-col";
-                // URL is passed through the Worker's bypass logic
+                div.className = "iframe-wrapper rounded-xl overflow-hidden flex flex-col shadow-2xl border border-gray-700";
+
+                // Proxy URL handles the bypass and relative path fixes
                 const proxiedUrl = `${WORKER_URL}/?url=${encodeURIComponent(url)}`;
+
                 div.innerHTML = `
-                    <div class="p-2 text-xs bg-gray-800 flex justify-between"><span>${id}</span></div>
-                    <iframe src="${proxiedUrl}" class="flex-grow border-none"></iframe>`;
+                    <div class="p-2 text-[10px] bg-gray-900 border-b border-gray-800 flex justify-between items-center uppercase tracking-widest font-bold text-gray-400">
+                        <span>ID: ${id}</span>
+                        <button onclick="handleIframe('close', null, '${id}')" class="hover:text-white">✕</button>
+                    </div>
+                    <iframe src="${proxiedUrl}" class="flex-grow border-none w-full h-full bg-white"></iframe>`;
                 grid.appendChild(div);
             } else {
                 document.getElementById(`frame-${id}`)?.remove();
